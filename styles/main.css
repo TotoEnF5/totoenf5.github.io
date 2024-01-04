@@ -38,10 +38,3 @@ img.pp {
     border-radius: 100%;
     vertical-align: middle;
 }
-
-p.title {
-    text-align: left;
-    position: absolute;
-    left: 1%;
-    top: 1%;
-}
