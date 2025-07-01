@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/x-icon" href="./toto.png">
+    <link rel="stylesheet" href="./styles/style.css">
+    <link rel="stylesheet" href="./styles/blog.css">
+    <link rel="stylesheet" href="./styles/atom-one-dark.css">
+    <title>Templated dynamic arrays in good old C - TotoEnF5</title>
+</head>
+<body>
+    <script src="./highlight.min.js"></script>
+    <script>hljs.highlightAll();</script>
+
+<div class="blog">
+    <p><a href="./index.html">&lt;- Back to my website</a></p>
+
+    <h1>Templated dynamic arrays in good old C</h1>
+
+    <h1>Table of contents</h1>
+    <ol>
+        <li><a href="#intro">Introduction</a></li>
+        <li><a href="#theory">Dynamic array theory</a></li>
+        <li><a href="#preprocessor">I love the preprocessor</a></li>
+        <li><a href="#hell">Preprocessor hell</a></li>
+        <li><a href="#foreach">For each loops?????? In my C programming language????</a></li>
+        <li><a href="#practice">In practice</a></li>
+    </ol>
+    
+    <h2 id="intro">Introduction</h2>
+    <p>C is one of my favorite programming languages. There are lots of reasons for that, the main one being that I hate myself. In the process of creating a game engine in C (I told you I hated myself), I asked myself an interesting question: where the fuck are my <code>std::vector</code>s?</p>
+    <p>In more modern (and arguably better) languages like C++, Java or Rust, the standard library provides nice classes and interfaces to create dynamic arrays easily. C is no such language. C&#39;s standard library sucks. C makes you do all the dirty work yourself.</p>
+    <p>Fine.</p>
+    <p>I&#39;ll do it myself.</p>
+    <h2 id="theory">Dynamic array theory</h2>
+    <p>A dynamic array is a contiguous area of memory that can expand based on the needs of the situation. For example in C++, you could create an <code>std::vector</code> (which is a the C++ (aka stupid) way of naming a dynamic array) of any initial size, and every time you call the <code>push_back</code> (or any variant) method, the array will grow as needed.</p>
+    <p>This is trivial to implement honestly, you just need to define a structure that holds a buffer, the capacity of the buffer (initialized to 3) and the length of the array (initialized to 0):</p>
+    <pre><code class="language-c">typedef struct cool_array_t {
+    int* buffer;
+    size_t length;
+    size_t capacity;
+} cool_array_t;
+
+cool_array_t* array_new() {
+    cool_array_t* self = (cool_array_t*)malloc(sizeof(cool_array_t));
+    self-&gt;capacity = 3;
+    self-&gt;buffer = (int*)malloc(sizeof(int) * self-&gt;capacity);
+    self-&gt;length = 0;
+    return self;
+}
+
+void array_delete(cool_array_t* self) {
+    free(self-&gt;buffer);
+    free(self);
+}</code></pre>
+    <p>Alright, that&#39;s cool and all, but how do we add an element to the array? Let&#39;s declare a function to do that. When we add an element to the array, we want to check if the length of the array is equal or larger than the capacity. If that is the case, it means we need to grow the array (with a simple <code>realloc</code> call that will transfer the memory to a new, bigger buffer). How much we grow the array by is completly arbitrary, so I chose to add half the array size each time we grow it (I thinks it&#39;s the way MSVC does it, but I&#39;m really not sure).</p>
+    <pre><code class="language-c">void array_add(cool_array_t* self, int element) {
+    if (self-&gt;length &gt;= self-&gt;capacity) {
+        self-&gt;capacity += self-&gt;capacity / 2 + 1;
+        self-&gt;buffer = (cool_array_t*)realloc(self-&gt;buffer, self-&gt;capacity * sizeof(int));
+    }
+
+    self-&gt;buffer[self-&gt;length] = element;
+    self-&gt;length++;
+}</code></pre>
+    <p>That&#39;s basically all there is to know about adding an element in a dynamic array. All other insertions follow the same principle. I will leave the removing operations as an exercice for the reader because I&#39;m feeling lazy today and I&#39;ve decided it&#39s; out of the scope of this article.</p>
+    <p>But there&#39;s a problem: I promised you templates, but there is no template to be seen. Did I lie to you? Did I deceive you? Well, kind of.</p>
+    <h2 id="preprocessor">I love the preprocessor</h2>
+    <p>Every C developper knows that C offers no kind of polymorphism (it hadn&#39;t been invented yet). So I did lie to you when I said I would use templates in C. But we have something else. We have the all mighty preprocessor.</p>
+    <p>The preprocessor is a powerful tool in the C compiler that allows us to write unreadable code that no one can understand and maintain, but it is able to make every C developper dream come true (I&#39;m talking about templates). So how can we leverage the power of the preprocessor to achieve polymorphism? The answer is simple: just declare more functions for more types.</p>
+    <p>To achieve this, we will use the concatenation operator <code>##</code>, which is an operator so obscure that I&#39;ve only seen it used in StackOverflow answers with less than 5 score. The idea is that you can take a macro parameter, and &quot;glue&quot; it to anything else in your macro. For example:</p>
+    <pre><code class="language-c">#define GLUE(x, y) x##y
+printf(&quot;%d\n&quot;, GLUE(6, 9));</code></pre>
+    <p>will print <code>69</code> to the console.</p>
+    <p>Using this operator allows us to create new function names on the fly with the preprocessor :</p>
+    <pre><code class="language-c">#define DECL(prefix) \
+    void* prefix##_is_shit() { \
+        return NULL; \
+    }
+
+DECL(rust);
+DECL(java);</code></pre>
+    <p>will create two functions: one named <code>rust_is_shit()</code> and another named <code>java_is_shit()</code>. You can probably see where I&#39;m going with this.</p>
+    <h2 id="hell">Preprocessor hell</h2>
+    <p>Prepare yourself, we&#39;re about to stop writing C and start writing for the preprocessor (which is still C, but for REAL developers). Instead of declaring our array type and functions as usual, we will declare them in a big ass macro that will take one argument: the type of the data we want to store. We can then use it to generate more functions that will take the specialized array type as an argument :</p>
+    <pre><code class="language-c">#define ARRAY_DECL(type) \
+    typedef struct type##_array_t { \
+        type* buffer; \
+        size_t capacity; \
+        size_t length; \
+    } type##_array_t;
+
+ARRAY_DECL(int);
+ARRAY_DECL(float);
+
+typedef struct cool_type_t { int foo; } cool_type_t;
+ARRAY_DECL(cool_type_t);</code></pre>
+    <p>With this bit of code, we are now able to create new array types on the fly using the preprocessor. It even works with custom types!</p>
+    <p>There&#39;s something wrong with this though. The array of <code>cool_type_t</code> is named <code>cool_type_t_array_t</code>, which is ugly and not easy to type. Idealy, we&#39;d want to remove the <code>_t</code> from <code>cool_type_t</code> before glueing the <code>_array_t</code> part. (Note that this is only a problem due to my naming conventions (which are undeniably superior than yours), and if you name your types the Java way, you won&#39;t have that problem)</p>
+    <p>To solve this problem, let&#39;s modify the macro:</p>
+    <pre><code class="language-c">#define ARRAY_DECL(type, prefix) \
+    typedef struct prefix##_array_t { \
+        // blablabla
+    } prefix##_array_t;
+
+typedef struct cool_type_t { int foo; } cool_type_t;
+ARRAY_DECL(cool_type_t, cool_type);</code></pre>
+    <p>Now, the array is named <code>cool_type_array_t</code>, which is a bit better. The neat thing is that you can also give arbitrary names to your arrays, you&#39;re not limited to the name of the type you want to create an array of (which I&#39;m still struggling to find a use case for).</p>
+    <p>This is very nice, but we still need to declare the functions to actually use the array:</p>
+    <pre><code class="language-c">#define ARRAY_DECL(type, prefix) \
+    typedef struct prefix##_array_t { \
+        // blablabla
+    } prefix##_array_t; \
+    \
+    prefix##_array_t* array_new() { \
+        prefix##_array_t* self = (prefix##_array_t*)malloc(sizeof(cool_array_t)); \
+        self-&gt;capacity = 3; \
+        self-&gt;buffer = (int*)malloc(sizeof(type) * self-&gt;capacity); \
+        self-&gt;length = 0; \
+        return self; \
+    } \
+    \
+    void array_delete(prefix##_array_t* self) { \
+        free(self-&gt;buffer); \
+        free(self); \
+    } \
+    \
+    void array_add(prefix##_array_t* self, int element) { \
+        if (self-&gt;length &gt;= self-&gt;capacity) { \
+            self-&gt;capacity += self-&gt;capacity / 2 + 1; \
+            self-&gt;buffer = (prefix##_array_t*)realloc(self-&gt;buffer, self-&gt;capacity * sizeof(type)); \
+        } \
+        self-&gt;buffer[self-&gt;length] = element; \
+        self-&gt;length++; \
+    }</code></pre>
+    <p>I just copy-pasted the code from before, and replaced all occurences of <code>cool_array_t</code> with <code>prefix##_array_t</code> and <code>int</code> with <code>type</code> (the macro argument).</p>
+    <h2 id="foreach">For each loops?????? In my C programming language????</h2>
+    <p>You know what else we can do with the preprocessor? That&#39;s right, for each loops! No need to write the old clunky C-style for loop, we can make our own! But before that, we need to talk about the comma operator.</p>
+    <p>Just like the concatenation operator, the comma operator is a rather obscure functionality of C. You may have used it before, without knowing its existence, always in the shadows.</p>
+    <p>The way it works is really simple: it evaluates the right-hand expression, then evaluates the left-hand expression and returns it. Take this snippet of code:</p>
+    <pre><code class="language-c">int a = 0;
+int b = 69;
+int c = a++, a += b;</code></pre>
+    <p>Here, when evaluating the assignment to <code>c</code>, the program first increments <code>a</code>, then adds <code>b</code> to <code>a</code>, and returns the result. That way, in a single line of code, we have incremented <code>a</code>, added <code>b</code> to <code>a</code>, and assigned <code>c</code> to the final value of <code>a</code>, which would be 70.</p>
+    <p>This operator is rarely used in real code because it creates an unreadable mess of a codebase, but we&#39;re not writing real code here. We&#39;re doing crimes against the C community.</p>
+    <p>Using this knowledge, we are now able to create our own for each loop, by replacing it with a real for loop in the preprocessor.</p>
+    <pre><code class="language-c">#define ARRAY_FOREACH(self, elem, i) for ((i) = 0, (elem) = (self)-&gt;buffer[0]; (i) &lt; (self)-&gt;length; (i)++, (elem) = (self)-&gt;buffer[i])
+
+int_array_t* a = int_array_new();
+int elem;
+int i;
+ARRAY_FOREACH(a, elem, i) {
+    // do stuff with elem, which is the i-th element of the array
+}</code></pre>
+    <p>This is how it works: the C-style for loop is composed of three phases (in order):</p>
+    <ul>
+    <li>The initialization, evaluated once and only once before the first iteration of the loop.</li>
+    <li>The condition, evaluated every iteration, before the loop body.</li>
+    <li>The incrementation, evaluated every iteration, after the loop body.</li>
+    </ul>
+    <p>In the initializtion phase, we set <code>i</code> to 0, as usual, but we also set the current element (which is named <code>elem</code> here) to <code>array[0]</code>. This is because the incrementation phase is executed after the loop body, so we need to initialize the first element ourselves.</p>
+    <p>The condition phase is as usual.</p>
+    <p>In the incrementation phase, we increment <code>i</code> as usual, and we also update <code>elem</code> to be the i-th element of the array.</p>
+    <p>Our for each loop can now be used as a usual for loop, but better! (depending on what you would define as better)</p>
+    <p>We are now finished with the preprocessor code (thank god). Let&#39;s see what it looks like in action!</p>
+    <h2 id="practice">In practice</h2>
+    <p>I have put all the preprocessor stuff in a file named <code>array.h</code>.</p>
+    <pre><code class="language-c">#include &quot;array.h&quot;
+#include &lt;stdio.h&gt;
+
+typedef struct foo_t {
+    int foo;
+    float bar;
+} foo_t;
+ARRAY_DECL(foo_t, foo);
+
+int main(int argc, char* argv[]) {
+    foo_array_t* array = foo_array_new();
+    foo_array_add(array, (foo_t){ .foo = 0, .bar = 0.0f });
+    foo_array_add(array, (foo_t){ .foo = 1, .bar = 1.0f });
+    foo_array_add(array, (foo_t){ .foo = 2, .bar = 2.0f });
+
+    foo_t elem;
+    int i;
+    ARRAY_FOREACH(array, elem, i) {
+        printf(&quot;element %d: foo = %d, bar = %f\n&quot;, i, elem.foo, elem.bar);
+    }
+
+    foo_array_delete(array);
+    return 0;
+}</code></pre>
+    <p>And there we go! We have achieved our goal!</p>
+    <p>With &lt;3, from Tom
+    <p>07&#47;01&#47;2025</p>
+</div>
+</body>
+</html>

@@ -12,7 +12,7 @@ body {
     color: white;
     background-color: #0F0A0F;
     padding: 1em;
-    user-select: none;
+    cursor: default;
 }
 
 h1 img {

@@ -1,0 +1,14 @@
+.blog {
+    max-width: 75ch;
+    text-align: justify;
+    text-justify: auto;
+    margin: auto
+}
+
+pre {
+    cursor: text;
+}
+
+code {
+    border-radius: 8px;
+}
