@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/x-icon" href="./toto.png">
+    <link rel="stylesheet" href="./styles/style.css">
+    <link rel="stylesheet" href="./styles/blog.css">
+    <link rel="stylesheet" href="./styles/atom-one-dark.css">
+    <title>Making a Wii game in the big 2025 - TotoEnF5</title>
+</head>
+<body>
+    <script src="./highlight.min.js"></script>
+    <script>hljs.highlightAll();</script>
+
+<div class="blog">
+    <p><a href="./index.html">&lt;- Back to my website</a></p>
+
+    <h1>Making a Wii game in the big 2025</h1>
+
+    <h1>Table of contents</h1>
+    <ol>
+        <li><a href="#intro">Introduction</a></li>
+        <li><a href="#devenv">Setting up the dev environment</a></li>
+        <li><a href="#texture">Displaying a texture</a></li>
+        <li><a href="#gx_setup">Setting up GX</a></li>
+        <li><a href="#vertex">Vertex description</a></li>
+        <li><a href="#texture_init">Texture initialization</a></li>
+        <li><a href="#finally">Finally drawing stuff</a></li>
+        <li><a href="#the_end">The end?</a></li>
+    </ol>
+
+    <h2 id="intro">Introduction</h2>
+    <p>I was born in 2004. Like many others from my generation, playing Mario Kart Wii, SSBB and many other games with my sisters are some of the best memories I have. A few weeks ago, I decided to take out my old Wii and play some Wii Party (goated game btw) with a friend. And, you know, I am older now, I am a more mature, and (arguably) smarter man, with a degree in computer science, so naturally, I came up with an idea.</p>
+    <p>What if I made a game for the Wii?</p>
+    
+    <h2 id="devenv">Setting up the dev environment</h2>
+    <p>Give a developper 7 days to create an app, and they will spend the first 6 gooning to their Neovim config. This citation (that I made up) certainly applies to me. Setting up a dev environment for a dead console could be a pretty hard task; luckily, an organisation named <a href="https://github.com/devkitPro" target="_blank">DevkitPro</a> has already done the dirty work for us. DevkitPro provides toolchains for developping software on consoles, which I will use to make my game.</p>
+    <p>So I installed the Wii toolchain, but what now? How do I use the cross-compiler and the other tools? After browsing DevkitPro's Github profile, I stumbled across <a href="https://github.com/devkitPro/wii-examples" target="_blank">this repository</a> which contains lots of examples and templates to make a Wii homebrew. I did what I do best, and I hit the CTRL, C, and V keys on my keyboard to get some source code. Finally, I can simply <code>make</code> my project and launch the resulting <code>.dol</code> file with <a href="https://dolphin-emu.org/">Dolphin</a>.</p>
+    <p>This is the code needed to print "Hello world!" to the screen:</p>
+    <pre><code class="language-c">VIDEO_Init();
+
+GXRModeObj* rmode = VIDEO_GetPreferredMode(NULL);
+void* xfb = MEM_K0_TO_K1(SYS_AllocateFramebuffer(rmode));
+
+console_init(xfb, 20, 20, rmode->fbWidth - 20, rmode->xfbHeight - 20, rmode->fbWidth * VI_DISPLAY_PIX_SZ);
+
+VIDEO_Configure(rmode);
+VIDEO_SetNextFramebuffer(xfb);
+VIDEO_ClearFrameBuffer(rmode, xfb, COLOR_BLACK);
+VIDEO_SetBlack(false);
+VIDEO_Flush();
+VIDEO_WaitVSync();
+if (rmode->viTVMode & VI_NON_INTERLACE) {
+    VIDEO_WaitVSync();
+}
+
+printf("Hello world!\n");
+
+while (true) { ... }</code></pre>
+    <p class="smol">The original code contains a lot of comments, so I removed them because I think the code is self-explanatory.</p>
+    <p>Well, that's a lot more than a conventionnal call to <code>printf</code>.</p>
+    <p>Because I don't have access to a Wii devkit, I can't just make a call to <code>printf</code> and get my message to be printed to the console (because I don't have a debug console) (I'm talking about the terminal one, not the Wii). In order to be able to see my message, I will need to draw it directly to the screen.</p>
+    <p>This is what all of the code is for: it initializes the Wii video system, creates a framebuffer, and initializes the console so the text is drawn on the screen. Once we've done all of this, we can finally print text!</p>
+    <p>Alright, printing text is cool and all, but we want to create a more modern game, we need to be able to display a texture.</p>
+
+    <h2 id="texture">Displaying a texture</h2>
+    <p>Before displaying a texture, we need to set things up. That's right I tricked you, this chapter is actually about the inner workings of the Wii graphics API!</p>
+    <p>The Wii graphics API is called GX (very original Nintendo), and we will have to use it in order to draw a quad, which we need to draw if we want to display a texture. An implementation of this API is provided in the toochain, and the documentation is easily accessible online (although I will NOT provide a link to said documentation since it's written CONFIDENTIAL in all caps on every page of the book).</p>
+    <p>The first GX object we create is the FIFO (First In First Out, a fancy name for a queue). The FIFO is used by the CPU and the GPU to send and handle instructions in parallel. Right now, we are using the FIFO in immediate mode, which is the default mode GX puts us in. This is the easy version of GX, because we can just write instructions using the GX API and the hardware will process the instructions without needing our intervention.</p>
+    <p>Another mode, the multi-buffer mode, requires us to create two FIFOs, and allows for more dynamic memory management. We will not need this mode for now, so we can create only one FIFO.</p>
+    <pre><code class="language-c">#define FIFO_SIZE (256 * 1024)
+
+void* fifo_buffer = MEM_K0_TO_K1(memalign(32, FIFO_SIZE));
+memset(fifo_buffer, 0, FIFO_SIZE);</code></pre>
+    <p>This is the code that creates the FIFO. The GX documentation specifies that the FIFO must be aligned to 32 bytes, so we use <code>memalign</code> to do just that. <code>MEM_K0_TO_K1</code> is a macro that casts a cached virtual address to a an uncached virtual address (and I don't understand what that means).</p>
+    <p>We are also going to create a second framebuffer, so we can have some double-buffering action going on:</p>
+    <pre><code class="language-c">void* framebuffers[2];
+framebuffers[0] = MEM_K0_TO_K1(SYS_AllocateFramebuffer(gfx_state.screen_mode));
+framebuffers[1] = MEM_K0_TO_K1(SYS_AllocateFramebuffer(gfx_state.screen_mode));
+unsigned int fb_index = 0;</code></pre>
+    <p>Now that we have our FIFO and framebuffers, let's set up GX!</p>
+
+    <h2 id="gx_setup">Setting up GX</h2>
+    <p>The GX API looks a lot like old OpenGL, which is a fixed-state machine (kind of). That means we have little to no control over the shaders for example, but that also means it's really easy to display primitive shapes like triangles and quads (easier than modern OpenGL or Vulkan I mean).</p>
+    <p>Let's write the code for that:</p>
+    <pre><code class="language-c">GX_Init(fifo_buffer, FIFO_SIZE);
+GX_SetCopyClear((GXColor){ 0, 0, 0, 255 }, 0x00FFFFFF);
+GX_SetViewport(0.0f, 0.0f, screen_mode->fbWidth, screen_mode->efbHeight, 0.0f, 1.0f);
+GX_SetDispCopyYScale((f32)screen_mode->xfbHeight / (f32)screen_mode->efbHeight);
+GX_SetScissor(0, 0, screen_mode->fbWidth, screen_mode->efbHeight);
+GX_SetDispCopySrc(0, 0, screen_mode->fbWidth, screen_mode->efbHeight);
+GX_SetDispCopyDst(screen_mode->fbWidth, screen_mode->xfbHeight);
+GX_SetCopyFilter(screen_mode->aa, screen_mode->sample_pattern, GX_TRUE, screen_mode->vfilter);
+GX_SetFieldMode(screen_mode->field_rendering, (screen_mode->viHeight == 2 * screen_mode->xfbHeight) ? GX_ENABLE : GX_DISABLE);
+
+GX_SetCullMode(GX_CULL_NONE);
+GX_CopyDisp(current_fb, GX_TRUE);
+GX_SetDispCopyGamma(GX_GM_1_0);
+
+GX_SetZMode(GX_TRUE, GX_LEQUAL, GX_TRUE);
+GX_SetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_CLEAR);
+GX_SetAlphaUpdate(GX_TRUE);
+GX_SetColorUpdate(GX_TRUE);</code></pre>
+    <p class="smol">Again this is mostly stolen from the DevkitPro examples.</p>
+    <p>Let's break all of this down.</p>
+    <div style="text-align: center;"><img src="./media/wii_game/mario_dance.gif" width="128"/><p class="smol">haha very funny</p></div>
+    <p>First, we initialize GX and give it the FIFO we just created with <code>GX_Init</code>. Then, the call to <code>GX_SetCopyClear</code> sets the clear color before drawing our stuff. We set the clear color to a fully opaque black.</p>
+    <p>Next, we can start to setup the viewport. Just like in OpenGL, the viewport represents the visible region of the screen. Let's set its size to the framebuffer size with <code>GX_SetViewport</code>.</p>
+    <p>After that, I have to admit that I don't fully understand what <code>GX_SetDispCopyYScale</code> does. From what I understand, the Wii is able to scale the image sent to the screen based on a factor that we specify when calling this function. We set this factor to the ratio between the external framebuffer height (<code>xfbHeight</code>) and the embedded framebuffer height (<code>efbHeight</code>).</p>
+    <p>Then, we set the scissor size with <code>GX_SetScissor</code>, which is usually the same size as the viewport. <code>GX_SetDispCopySrc</code> and <code>GX_SetDispCopySrc</code> are used to set the size in pixels of the zone we want to copy to the screen. The next two calls (<code>GX_SetCopyFilter</code> and <code>GX_SetFieldMode</code>) are honestly too low-level for me, and I will leave the explanation as an exercise to the reader.</p>
+    <p>The next three calls respectively set the cull mode (<code>GX_SetCullMode</code>, I love it when function names are explicit), copy the embedded framebuffer to the external framebuffer (<code>GX_CopyDisp</code>, this one is less explicit), and set the gamma correction to 1 (<code>GX_SetCopyDispGamma</code>).</p>
+    <p>Finally, we set the depth comparison operation with <code>GX_SetZMode</code>, we set the blend mode to clear with <code>GX_SetBlendMode</code>, and tell GX we want to update the alpha and color channels with <code>GX_SetAlphaUpdate</code> and <code>GX_SetColorUpdate</code>. These calls were in the rendering loop in the example, which I don't really understand since they are setup calls, so I moved them to the setup part.</p>
+    <p>Phew, that was a lot of code to process. Thankfully, most of the remaining code is easier to understand (if you are familiar with OpenGL, that is).</p>
+    <p>A final setup step we have to do is to generate the projection matrix. Thankfully, DevkitPro provides a math library that we will use to create our matrix:</p>
+    <pre><code class="language-c">Mtx44 projection;
+guOrtho(projection, 0, 479, 0, 639, 0, 300);
+GX_LoadProjectionMtx(projection, GX_ORTHOGRAPHIC);</code></pre>
+    <p>This creates a orthographics projection matrix (since I want to work in 2D) and hands it over to GX. Pretty easy!</p>
+
+    <h2 id="vertex">Vertex description</h2>
+    <p>Just like in modern OpenGL, we need to tell GX what our vertices are going to look like. We are going to display a textured quad, so all we need to store is a vertex position, and a texture coordinate, both in floating-point numbers.</p>
+    <pre><code class="language-c">GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XY, GX_F32, 0);
+GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_TEX_ST, GX_F32, 0);</code></pre>
+    <p class="smol">Wow that's a lot shorter than with Vulkan</p>
+    <p>Both calls serve the same purpose, to tell the vertex descriptor what kind of data to expect. What we do here is that we store this information in descriptor <code>GX_VTWFMT0</code> (or format? I don't know what the right word is).</p>
+    <p>First, we tell that we want to store two components (<code>GX_POS_XY</code>) of position data (<code>GX_VA_POS</code>) represented with floating point numbers (<code>GX_F32</code>).</p>
+    <p>The next call does the exact same thing, but for texture coordinates.</p>
+
+    <h2 id="texture_init">Texture initialization</h2>
+    <p>Alright, this is the fun part. Before we write any code, we need to do a little bit of file management. We aren't actually going to load the texture from the filesystem, instead we are going to embed the image directly in the binary file. There is actually a tool in the toolchain to do that, and thankfully, we don't even have to use it manually. The <a href="https://github.com/devkitPro/wii-examples/blob/master/graphics/gx/gxSprites/Makefile" target="_blank">Makefile provided in the example</a> has a rule for converting image files into raw binary data that links against the other object files.</p>
+    <p>In our case, we are going to create a directory named "textures" that contains all the textures. Right next to the textures, we need to create a <code>.scf</code> file that holds the information about our textures. The SCF file looks like this:</p>
+    <pre><code>&lt;filepath="texture.jpg" id="t_skeleton" colfmt=6 &#47&gt;</code></pre>
+    <p class="smol">It's an image of a random skeleton meme I found on Pinterest</p>
+    <p>As you can see, the SCF file is an XML file that specifies the path and an ID for the texture. I've still got to understand the color format part though.</p>
+    <p>When the Makefile sees the SCF file, it converts the image file into a binary file with the TPL extension, and creates two header files that specify some information about the image. The API will then use this info to generate textures that GX will gladly accept.</p>
+    <p>Back to C code! Before loading and creating the texture, we need to do some more setup.</p>
+    <pre><code class="language-c">GX_SetNumChans(1);
+GX_SetNumTexGens(1);
+GX_SetTevOp(GX_TEVSTAGE0, GX_REPLACE);
+GX_SetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR0A0);
+GX_SetTexCoordGen(GX_TEXCOORD0, GX_TG_MTX2x4, GX_TG_TEX0, GX_IDENTITY);
+
+GX_InvalidateTexAll();</code></pre>
+    <p>First, we tell GX the number of color channels that are output with <code>GX_SetNumChans</code>. I think this is mostly for 3D lighting stuff, but the folks at DevkitPro did it on their examples so I'm going to do the same. Next, we tell GX the number of generated texture coordinates with <code>GX_SetNumTexGens</code>. The <code>GX_SetTevOp</code> call is used to tell the API how to process colors. Here, we tell it to replace all colors and alpha channels.</p>
+    <p>The next two calls, <code>GX_SetTevOrder</code> and <code>GX_SetTexCoordGen</code> work in pair, and are a mystery to me. It appears the first function uses the output produced by the second function (which tells how texture coordinates are generated) to handle the processing of texture rasterizaton. I think I need to learn more about the Wii hardware to fully understand how texture generation works.</p>
+    <p>The final call, <code>GX_InvalidateTexAll</code>, simply invalidates the texture memory cache.</p>
+
+    <h2 id="texture_load">Loading the texture</h2>
+    <p>I swear, most of the setup is over now. We can FINALLY load the image! To do that, we will <code>#include</code> both header files that were generated earlier by our Makefile. Then we will store the texture in a <code>GXTexObj</code>:</p>
+    <pre><code class="language-c">#include "skeleton_tpl.h"
+#include "skeleton.h"
+
+GX_InvalidateTexAll();
+
+GXTexObj texture;
+TPLFile sprite_tpl;
+
+TPL_OpenTPLFromMemory(&sprite_tpl, (void*)skeleton_tpl, skeleton_tpl_size);
+TPL_GetTexture(&sprite_tpl, id, &texture);</code></pre>
+    <p class="smol">This is pretty straightforward for once</p>
+    <p>First, we get the raw memory data from the TPL with <code>TPL_OpenTPLFromMemory</code>, then, we create a texture object with <code>TPL_GetTexture</code>.</p>
+    <p>Now, whenever we want to use this texture to draw anything, we just have to call <code>GX_LoadTexObj</code> and GX will happily use the texture.</p>
+    <pre><code class="language-c">GX_LoadTexObj(&texture, GX_TEXMAP0);</code></pre>
+
+    <h2 id="finally">Finally drawing stuff</h2>
+    <p>OK, now we get to the fun part. This is why you were here in the first place. This is everything you ever wanted. This is the drawing instructions.</p>
+    <p>Finally.</p>
+    <p>BUT NOT BEFORE SOME MORE SETUP!</p>
+    <p class="smol">I swear I'm becoming insane.</p>
+    <p>All of the following code should be called in the rendering loop of the program.</p>
+    <pre><code class="language-c">GX_InvVtxCache();
+GX_InvalidateTexAll();
+
+GX_ClearVtxDesc();
+GX_SetVtxDesc(GX_VA_POS, GX_DIRECT);
+GX_SetVtxDesc(GX_VA_TEX0, GX_DIRECT);</code></pre>
+    <p>With these calls, we invalidate the current vertex cache and tell GX that we are going to send direct vertex data. If you followed correctly, you'd notice that the parameters match what we specified earlier in the <a href="#vertex">vertex description</a>.</p>
+    <p>Then we create and load the model-view matrix using the handy math library:</p>
+    <pre><code class="language-c">Mtx model_view;
+guMtxIdentity(model_view);
+guMtxTransApply(model_view, model_view, 0.0f, 0.0f, -1.0f);
+GX_LoadPosMtxImm(model_view, GX_PNMTX0);</code></pre>
+    <p>And finally, FINALLY we get to the drawing part:</p>
+    <pre><code class="language-c">GX_Begin(GX_QUADS, GX_VTXFMT0, 4);
+    GX_Position2f32(100.0f, 300.0f);
+    GX_TexCoord2f32(0.0f, 1.0f);
+
+    GX_Position2f32(300.0f, 300.0f);
+    GX_TexCoord2f32(1.0f, 1.0f);
+
+    GX_Position2f32(300.0f, 100.0f);
+    GX_TexCoord2f32(1.0f, 0.0f);
+
+    GX_Position2f32(100.0f, 100.0f);
+    GX_TexCoord2f32(0.0f, 0.0f);
+GX_End();
+
+GX_DrawDone();</code></pre>
+    <p>Wait. That's all? That's all we need to draw a quad? Well... That's short for sure. But as everyone tells me, length doesn't really matter I guess.</p>
+    <p>We tell GX that we begin a draw call with <code>GX_Begin</code>, and specify that we are drawing a quad using the format we described earlier. Then, we specify each corner of the quad: first the position with <code>GX_Position2f32</code> and the texture coordinate with <code>GX_TexCoord2f32</code>. When we are done with the quad specification, we can end the draw call with <code>GX_End</code> and <code>GX_DrawDone</code>.</p>
+    <p>But we aren't over yet! We still need to render the framebuffer to the screen:</p>
+    <pre><code class="language-c">GX_CopyDisp(framebuffers[fb_index], GX_TRUE);
+
+VIDEO_SetNextFramebuffer(framebuffers[fb_index]);
+
+if (first_frame) {
+    VIDEO_SetBlack(GX_FALSE);
+    first_frame = false;
+}
+
+VIDEO_Flush();
+VIDEO_WaitVSync();
+
+fb_index ^= 1;</code></pre>
+    <p>First, we copy the embedded framebuffer to the external framebuffer with <code>GX_CopyDisp</code>, and tell the video API what framebuffer to use next with <code>VIDEO_SetNextFramebuffer</code>. I don't really know what the call to <code>VIDEO_SetBlack</code> is for, but it is in the example so I might as well include it here. Finally, we can flush the video signal with <code>VIDEO_Flush</code> and wait for the vertical sync with <code>VIDEO_WaitVSync</code>. Don't forget to swap the framebuffers too!</p>
+    <p>And we are FINALLY DONE!!!!!</p>
+
+    <h2 id="the_end">The end?</h2>
+    <p>We finally have all the necessary code to draw a texture to the screen. We can now compile our code, launch the resulting homebrew with Dolphin, and admire the result:</p>
+    <div style="text-align: center;"><img src="./media/wii_game/Screenshot 2025-10-17 153935.png" /><p class="smol">hell yeah</p></div>
+    <p>There we go. We've made a program that displays an image for the Wii! Pretty cool huh?</p>
+    <p>Now, this isn't the end. I've planned to make a whole entire game for the Wii, and this is only the first step to make it.</p>
+    <p>I hope you enjoyed this little adventure on an retro consle, because I sure did :)</p>
+    <p>With &lt;3, from Tom
+    <p>??&#47;??&#47;2025</p>
+
+    <br/>
+    <br/>
+    <br/>
+    <br/>
+    <br/>
+
+    <h2 id="real_wii">BONUS! Running this shit on a real Wii</h2>
+    <p>Dolphin is cool, but you know what's better? That's right, a real console!</p>
+    <p>Obviously, you will need to <a href="https://wii.hacks.guide/" target="_blank">mod your console</a> to run your custom made homebrew. Once you have the Homebrew Channel installed, you're good to go.</p>
+    <p>The Homebrew Channel looks for homebrew in the <code>apps</code> directory at the root of the SD card. In this directory, each homebrew must have its own folder, with the following file structure:</p>
+    <ul>
+        <li><p><code>boot.dol</code>, which is the executable launch by the Homebrew Channel</p></li>
+        <li><p><code>meta.xml</code>, which holds infomation about the homebrew (the display name, the author...)</p></li>
+        <li><p><code>icon.png</code>, which is the icon (duh)</p></li>
+    </ul>
+    <p>The only file we need to process by hand is <code>meta.xml</code>. Luckily, <a href="https://oscwii.org/tools/metaxml" target="_blank">this website</a> provides an easy way to generate the XML information automatically!</p>
+    <p>The overall file structure must look like this:</p>
+    <pre><code>💾 SD Card or USB Drive
+| ╸📁 apps
+    | ╸📁 AppName1
+        | ╸📄 boot.dol
+        | ╸📄 meta.xml
+        | ╸📄 icon.png
+    | ╸📁 AppName2
+        | ╸📄 boot.dol
+        | ╸📄 meta.xml
+        | ╸📄 icon.png</code></pre>
+    <p class="smol">Stolen from <a href="https://wii.hacks.guide/hbc?tab=wii" target="_blank">here</a></p>
+    <p>Put your SD card back into your console, launch the Homebrew Channel, and you'll be greeted by this wonderful view:</p>
+    <h1>REAL WII PICTURE HERE</h1>
+    <p>You can launch the homebrew and there it is!</p>
+    <h1>REAL WII PICTURE HERE</h1>
+</div>
+</body>
+</html>

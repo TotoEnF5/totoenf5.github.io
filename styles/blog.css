@@ -12,3 +12,15 @@ pre {
 code {
     border-radius: 8px;
 }
+
+/* img {
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+    width: 50%;
+} */
+
+.smol {
+    font-size: small;
+    color: #999999;
+}
