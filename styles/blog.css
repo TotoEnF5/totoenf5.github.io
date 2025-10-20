@@ -21,3 +21,12 @@ img {
     font-size: small;
     color: #999999;
 }
+
+.back_to_top {
+    position: fixed;
+    bottom: 20px;
+    right: 30px;
+    padding: 6px;
+    border-radius: 8px;
+    background-color: #0F0A0FBB;
+}
