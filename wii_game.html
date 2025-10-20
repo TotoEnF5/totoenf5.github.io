@@ -69,7 +69,7 @@ while (true) { ... }</code></pre>
 
     <h2 id="texture">Displaying a texture</h2>
     <p>Before displaying a texture, we need to set things up. That's right I tricked you, this chapter is actually about the inner workings of the Wii graphics API!</p>
-    <p>The Wii graphics API is called GX (very original Nintendo), and we will have to use it in order to draw a quad, which we need to draw if we want to display a texture. An implementation of this API is provided in the toochain, and the documentation is easily accessible online (although I will NOT provide a link to said documentation since it's written CONFIDENTIAL in all caps on every page of the book).</p>
+    <p>The Wii graphics API is called GX (very original Nintendo), and we will have to use it in order to draw a quad, which we need to draw if we want to display a texture. An implementation of this API is provided in the toolchain, and the documentation is easily accessible online (although I will NOT provide a link to said documentation since it's written CONFIDENTIAL in all caps on every page of the book).</p>
     <p>The first GX object we create is the FIFO (First In First Out, a fancy name for a queue). The FIFO is used by the CPU and the GPU to send and handle instructions in parallel. Right now, we are using the FIFO in immediate mode, which is the default mode GX puts us in. This is the easy version of GX, because we can just write instructions using the GX API and the hardware will process the instructions without needing our intervention.</p>
     <p>Another mode, the multi-buffer mode, requires us to create two FIFOs, and allows for more dynamic memory management. We will not need this mode for now, so we can create only one FIFO.</p>
     <pre><code class="language-c">#define FIFO_SIZE (256 * 1024)
@@ -226,7 +226,7 @@ fb_index ^= 1;</code></pre>
     <p>Now, this isn't the end. I've planned to make a whole entire game for the Wii, and this is only the first step to make it.</p>
     <p>I hope you enjoyed this little adventure on an retro consle, because I sure did :)</p>
     <p>With &lt;3, from Tom
-    <p>??&#47;??&#47;2025</p>
+    <p>10&#47;20&#47;2025</p>
 
     <br/>
     <br/>
