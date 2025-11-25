@@ -15,6 +15,10 @@ body {
     cursor: default;
 }
 
+h1 {
+    font-size: xxx-large;
+}
+
 h1 img {
     vertical-align: middle;
     width: 3em;
